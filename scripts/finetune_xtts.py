@@ -128,7 +128,11 @@ def validate_dataset(dataset_path: Path) -> tuple[int, int]:
     """Return (train_count, eval_count) and exit on fatal issues."""
     meta = dataset_path / METADATA_FILENAME
     if not meta.exists():
-        logger.error("metadata.csv not found in %s — run prepare_dataset.py first.", dataset_path)
+        logger.error(
+            "metadata.csv not found in %s — build the dataset first with build_hf_xtts_dataset.py "
+            "or filter_annotated_for_xtts.py.",
+            dataset_path,
+        )
         sys.exit(1)
 
     missing_wavs = []

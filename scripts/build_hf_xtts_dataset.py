@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -34,7 +35,7 @@ def collect_rows(args: argparse.Namespace) -> list[dict]:
     by_speaker: dict[str, list[dict]] = defaultdict(list)
     for split in args.splits:
         print(f"[info] loading split={split} from {HF_DATASET}", flush=True)
-        ds = load_dataset(HF_DATASET, split=split).cast_column("audio", Audio(sampling_rate=None))
+        ds = load_dataset(HF_DATASET, split=split).cast_column("audio", Audio(decode=False))
         accepted_for_split = 0
         for example in ds:
             speaker_id = str(example.get("speaker_id") or "").strip()
@@ -46,6 +47,19 @@ def collect_rows(args: argparse.Namespace) -> list[dict]:
                 continue
             if quality < args.min_quality:
                 continue
+
+            audio = example.get("audio") or {}
+            raw = audio.get("bytes") if isinstance(audio, dict) else None
+            if not raw:
+                continue
+
+            try:
+                audio_array, sample_rate = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+            except Exception as exc:
+                source_id = str(example.get("source_id") or "")
+                print(f"[warn] skip split={split} source_id={source_id} decode failed: {exc}", flush=True)
+                continue
+
             by_speaker[speaker_id].append(
                 {
                     "split": split,
@@ -54,8 +68,8 @@ def collect_rows(args: argparse.Namespace) -> list[dict]:
                     "text": str(example.get("transcription") or "").strip(),
                     "duration": duration,
                     "quality_score": quality,
-                    "audio_array": example["audio"]["array"],
-                    "sample_rate": int(example["audio"]["sampling_rate"]),
+                    "audio_array": audio_array,
+                    "sample_rate": int(sample_rate),
                 }
             )
             accepted_for_split += 1
