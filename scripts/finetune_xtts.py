@@ -273,7 +273,6 @@ def main():
             "milestones": [int(args.steps * 0.5), int(args.steps * 0.8)],
             "gamma": 0.5,
         },
-        grad_accum_steps=args.grad_accum,
     )
 
     # --- Load samples ---
