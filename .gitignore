@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.python-version
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Environment and local config
+.env
+.env.*
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+server_out.txt
+server_err.txt
+
+# Runtime and model storage
+storage/
+
+# Local datasets and experiment output
+data/
+output/
+!output/
+!output/jupyter-notebook/
+!output/jupyter-notebook/*.ipynb
+
+# Archives and generated media
+*.zip
+*.tar
+*.tar.gz
+*.wav
+*.mp3
+*.pdf

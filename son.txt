@@ -1,0 +1,30 @@
+Act as a Senior Python Engineer and Open-Source ML Specialist. I need you to build a completely self-hosted, 100% free Shona voice cloning backend using FastAPI and open-source models. 
+
+CRITICAL CONSTRAINT: Do not use any paid external APIs (No ElevenLabs, No OpenAI, No Play.ht). The entire pipeline must run locally and for free on a consumer GPU with 6GB of VRAM (NVIDIA RTX 3050). 
+
+### Technical Requirements & Architecture
+
+1. Stack & Open-Source Library:
+- Use the open-source 'TTS' library (coqui-tts) specifically targeting the 'tts_models/multilingual/multi-dataset/xtts_v2' model, or a lightweight Hugging Face equivalent that supports zero-shot voice cloning.
+- The system must require ZERO internet access after the initial model download.
+
+2. 6GB VRAM Optimizations (Prevent Crashes):
+In 'app/services/tts_model.py', implement the following low-VRAM optimizations:
+- Load the model using FP16 (half-precision) to save VRAM: `model.to(device="cuda").half()` or equivalent configuration.
+- Wrap inference in `with torch.inference_mode():` and clear cache dynamically using `torch.cuda.empty_cache()` after generation to prevent VRAM memory leaks.
+
+3. Project Structure:
+Provide complete code for a modular layout:
+- `app/main.py` (FastAPI app init, CORS, lifespan event for model caching)
+- `app/config.py` (Pydantic Settings for local paths, e.g., model cache dir)
+- `app/routers/cloning.py` (Endpoints for audio upload and text-to-speech generation)
+- `app/services/audio_processor.py` (Uses python-ffmpeg or pydub to cleanly convert user uploads to 16kHz, mono, WAV format locally)
+- `app/services/tts_model.py` (Singleton pattern to keep the free model loaded in VRAM once, avoiding reload delays)
+- `Dockerfile` & `docker-compose.yml` (Configured with 'nvidia-container-toolkit' runtime for GPU pass-through)
+- `requirements.txt` (Pinned to open-source libraries: fastapi, uvicorn, TTS, torch, pydantic-settings)
+
+4. Endpoint Specifications:
+- POST `/api/v1/voices/upload`: Accepts a 10-30 second Shona audio sample. Converts it to standard WAV locally and saves it to a local folder (`./storage/voices/`).
+- POST `/api/v1/voices/generate`: Accepts JSON `{ "voice_id": "string", "text": "string" }`. Synthesizes the Shona text using the cloned voice model and returns a streaming WAV file response immediately.
+
+Please write the complete production-ready Python code for this local, free setup. Do not use pseudo-code, placeholders, or paid third-party SDKs.

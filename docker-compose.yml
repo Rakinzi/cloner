@@ -1,0 +1,15 @@
+services:
+  shona-voice-cloner:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLONER_DEVICE=cuda
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+      - model_cache:/root/.local/share/tts
+
+volumes:
+  model_cache:

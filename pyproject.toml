@@ -1,0 +1,33 @@
+[project]
+name = "shona-voice-cloner"
+version = "1.0.0"
+description = "Self-hosted Shona voice cloning backend using open-source models"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "coqui-tts==0.27.5",
+    "torch==2.2.2",
+    "torchaudio==2.2.2",
+    "pydantic-settings==2.7.0",
+    "scipy==1.14.1",
+    "numpy",
+    "python-multipart==0.0.20",
+    "transformers<5",
+    "aiofiles>=23.0",
+    "cutlet",
+    "unidic-lite",
+    "datasets>=5.0.0",
+    "soundfile>=0.14.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+override-dependencies = [
+    "numba==0.59.1",
+    "llvmlite==0.42.0",
+]
