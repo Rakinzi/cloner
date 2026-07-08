@@ -33,7 +33,9 @@ def parse_args() -> argparse.Namespace:
 def collect_rows(args: argparse.Namespace) -> list[dict]:
     by_speaker: dict[str, list[dict]] = defaultdict(list)
     for split in args.splits:
+        print(f"[info] loading split={split} from {HF_DATASET}", flush=True)
         ds = load_dataset(HF_DATASET, split=split).cast_column("audio", Audio(sampling_rate=None))
+        accepted_for_split = 0
         for example in ds:
             speaker_id = str(example.get("speaker_id") or "").strip()
             if not speaker_id or speaker_id == "unknown":
@@ -56,6 +58,10 @@ def collect_rows(args: argparse.Namespace) -> list[dict]:
                     "sample_rate": int(example["audio"]["sampling_rate"]),
                 }
             )
+            accepted_for_split += 1
+            if accepted_for_split % 100 == 0:
+                print(f"[progress] accepted {accepted_for_split} candidate clips from split={split}", flush=True)
+        print(f"[info] accepted {accepted_for_split} candidate clips from split={split}", flush=True)
 
     selected: list[dict] = []
     for speaker_id, rows in by_speaker.items():
@@ -76,13 +82,16 @@ def main() -> None:
     wav_dir.mkdir(parents=True, exist_ok=True)
 
     rows = collect_rows(args)
+    print(f"[info] writing {len(rows)} filtered clips to {output_dir}", flush=True)
     coqui_rows: list[dict[str, str]] = []
     full_rows: list[dict[str, str]] = []
 
-    for row in rows:
+    for idx, row in enumerate(rows, start=1):
         filename = f"speaker_{row['speaker_id']}_{row['source_id']}.wav"
         out_path = wav_dir / filename
         sf.write(out_path, row["audio_array"], row["sample_rate"], subtype="PCM_16")
+        if idx % 100 == 0 or idx == len(rows):
+            print(f"[progress] wrote {idx}/{len(rows)} wavs", flush=True)
         coqui_rows.append(
             {
                 "audio_file": f"wavs/{filename}",

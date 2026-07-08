@@ -153,6 +153,11 @@ def flush_done(
         converted_rows.append(future.result())
 
 
+def print_progress(done: int, total: int) -> None:
+    pct = (done / total * 100.0) if total else 100.0
+    print(f"[progress] converted {done}/{total} clips ({pct:.1f}%)", flush=True)
+
+
 def write_outputs(output_dir: Path, rows: list[dict[str, str]]) -> None:
     rows.sort(key=lambda row: row["audio_file"])
 
@@ -218,18 +223,28 @@ def main() -> None:
     selected = load_candidates(args)
     if not selected:
         raise SystemExit("No clips matched the requested filters")
+    print(f"[info] selected {len(selected)} clips from {source_root}", flush=True)
+    print(f"[info] converting audio with {max(1, args.workers)} worker(s)", flush=True)
 
     converted_rows: list[dict[str, str]] = []
     pending: set[Future] = set()
+    total = len(selected)
+    next_progress = min(25, total)
 
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
         for row in selected:
             pending.add(executor.submit(convert_one, source_root, wav_dir, row))
             if len(pending) >= max(4, args.workers * 4):
                 flush_done(pending, converted_rows)
+                if len(converted_rows) >= next_progress or len(converted_rows) == total:
+                    print_progress(len(converted_rows), total)
+                    next_progress = min(total, next_progress + max(25, total // 20 or 1))
 
         while pending:
             flush_done(pending, converted_rows)
+            if len(converted_rows) >= next_progress or len(converted_rows) == total:
+                print_progress(len(converted_rows), total)
+                next_progress = min(total, next_progress + max(25, total // 20 or 1))
 
     write_outputs(output_dir, converted_rows)
 

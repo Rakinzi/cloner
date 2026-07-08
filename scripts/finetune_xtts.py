@@ -20,12 +20,16 @@ import argparse
 import csv
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
 
 import torch
 from trainer import Trainer, TrainerArgs
+
+# Coqui TTS can inherit Colab's inline backend, which is invalid in some CLI runs.
+os.environ["MPLBACKEND"] = "Agg"
 
 from TTS.config.shared_configs import BaseDatasetConfig
 from TTS.tts.datasets import load_tts_samples

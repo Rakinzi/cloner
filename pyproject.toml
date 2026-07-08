@@ -19,6 +19,7 @@ dependencies = [
     "unidic-lite",
     "datasets>=5.0.0",
     "soundfile>=0.14.0",
+    "torchcodec>=0.7.0",
 ]
 
 [dependency-groups]
