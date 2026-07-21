@@ -302,7 +302,7 @@ def main():
     trainer = Trainer(
         TrainerArgs(
             restore_path=None,
-            grad_accum_steps=config.grad_accum_steps,
+            grad_accum_steps=args.grad_accum,
             continue_path=args.resume or "",
         ),
         config,
