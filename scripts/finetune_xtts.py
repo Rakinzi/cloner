@@ -170,7 +170,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size per GPU (default 1 for 6 GB VRAM)")
     parser.add_argument("--grad-accum", type=int, default=84, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=5e-6, help="Peak learning rate")
-    parser.add_argument("--steps", type=int, default=5000, help="Total training steps")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of passes over the dataset before training stops")
+    parser.add_argument("--steps", type=int, default=0,
+                        help="Override total optimizer steps used for LR decay milestones (0 = derive from dataset size)")
     parser.add_argument("--save-step", type=int, default=500, help="Save checkpoint every N steps")
     parser.add_argument("--workers", type=int, default=0, help="Dataloader workers (0 = main process, safer on Mac)")
     parser.add_argument("--no-half", action="store_true", help="Disable FP16 (use if you get NaN losses)")
@@ -241,6 +243,7 @@ def main():
         model_args=model_args,
         audio=audio_config,
         run_name="shona_xtts_v2",
+        epochs=args.epochs,
         batch_size=args.batch_size,
         eval_batch_size=args.batch_size,
         num_loader_workers=args.workers,
@@ -248,7 +251,7 @@ def main():
         print_step=50,
         plot_step=500,
         save_step=args.save_step,
-        save_n_checkpoints=3,
+        save_n_checkpoints=2,  # each is ~5 GB; 2 keeps free-tier Drive from filling
         save_checkpoints=True,
         print_eval=False,
         run_eval=True,
@@ -269,10 +272,10 @@ def main():
         optimizer_params={"betas": [0.9, 0.96], "eps": 1e-8, "weight_decay": 1e-2},
         lr=args.lr,
         lr_scheduler="MultiStepLR",
-        lr_scheduler_params={
-            "milestones": [int(args.steps * 0.5), int(args.steps * 0.8)],
-            "gamma": 0.5,
-        },
+        # Milestones are filled in after the samples are loaded, once the
+        # real number of optimizer steps is known.
+        lr_scheduler_params={"milestones": [1, 2], "gamma": 0.5},
+        scheduler_after_epoch=False,
     )
 
     # --- Load samples ---
@@ -289,6 +292,19 @@ def main():
 
     for s in train_samples + eval_samples:
         s["language"] = "en"
+
+    # --- LR decay milestones, in optimizer steps ---
+    total_opt_steps = args.steps or max(
+        1, args.epochs * len(train_samples) // (args.batch_size * args.grad_accum)
+    )
+    config.lr_scheduler_params["milestones"] = [
+        max(1, int(total_opt_steps * 0.5)),
+        max(2, int(total_opt_steps * 0.8)),
+    ]
+    logger.info(
+        "Training plan: %d epochs x %d samples -> ~%d optimizer steps (LR halves at %s)",
+        args.epochs, len(train_samples), total_opt_steps, config.lr_scheduler_params["milestones"],
+    )
 
     # --- Init model ---
     model = GPTTrainer.init_from_config(config, train_samples)
@@ -312,7 +328,7 @@ def main():
         eval_samples=eval_samples,
     )
 
-    logger.info("Starting fine-tuning for %d steps...", args.steps)
+    logger.info("Starting fine-tuning for %d epochs...", args.epochs)
     logger.info("Checkpoints saved every %d steps to: %s", args.save_step, output_path)
     trainer.fit()
 

@@ -14,6 +14,7 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 from datasets import Audio, load_dataset
 
@@ -58,6 +59,14 @@ def collect_rows(args: argparse.Namespace) -> list[dict]:
             except Exception as exc:
                 source_id = str(example.get("source_id") or "")
                 print(f"[warn] skip split={split} source_id={source_id} decode failed: {exc}", flush=True)
+                continue
+
+            # Guard against silent/corrupt audio: a decode bug once produced
+            # all-zero WAVs that passed every metadata filter and would have
+            # wasted an entire training run.
+            if float(np.abs(audio_array).max()) < 1e-4:
+                source_id = str(example.get("source_id") or "")
+                print(f"[warn] skip split={split} source_id={source_id} audio is silent", flush=True)
                 continue
 
             by_speaker[speaker_id].append(
