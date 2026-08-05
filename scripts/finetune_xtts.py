@@ -11,9 +11,10 @@ Usage:
     # 2. Run fine-tuning:
     python scripts/finetune_xtts.py --dataset ./data/shona_ft --output ./checkpoints/shona_xtts
 
-    # 3. Resume from a checkpoint:
+    # 3. Resume an interrupted run (pass the run FOLDER; a checkpoint .pth also works,
+    #    its parent folder is used):
     python scripts/finetune_xtts.py --dataset ./data/shona_ft --output ./checkpoints/shona_xtts \\
-        --resume ./checkpoints/shona_xtts/run-2024-01-01_00-00-00/checkpoint_1000.pth
+        --resume ./checkpoints/shona_xtts/run-2024-01-01_00-00-00
 """
 
 import argparse
@@ -166,7 +167,8 @@ def main():
     parser.add_argument("--dataset", required=True, help="Path to processed dataset (from prepare_dataset.py)")
     parser.add_argument("--output", default="./checkpoints/shona_xtts", help="Output directory for checkpoints")
     parser.add_argument("--cache", default="./cache/xtts_checkpoints", help="Cache dir for base model files")
-    parser.add_argument("--resume", default="", help="Path to checkpoint .pth to resume from")
+    parser.add_argument("--resume", default="",
+                        help="Run folder to resume from (a checkpoint .pth path is also accepted; its parent folder is used)")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size per GPU (default 1 for 6 GB VRAM)")
     parser.add_argument("--grad-accum", type=int, default=84, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=5e-6, help="Peak learning rate")
@@ -175,7 +177,9 @@ def main():
                         help="Override total optimizer steps used for LR decay milestones (0 = derive from dataset size)")
     parser.add_argument("--save-step", type=int, default=500, help="Save checkpoint every N steps")
     parser.add_argument("--workers", type=int, default=0, help="Dataloader workers (0 = main process, safer on Mac)")
-    parser.add_argument("--no-half", action="store_true", help="Disable FP16 (use if you get NaN losses)")
+    parser.add_argument("--half", action="store_true",
+                        help="Cast the GPT encoder to FP16. Only for GPUs under ~8 GB VRAM; risks dtype errors "
+                             "and optimizer underflow at low LR. Unnecessary on a 16 GB T4 at batch size 1.")
     parser.add_argument(
         "--xtts-language",
         default="en",
@@ -251,23 +255,15 @@ def main():
         print_step=50,
         plot_step=500,
         save_step=args.save_step,
-        save_n_checkpoints=2,  # each is ~5 GB; 2 keeps free-tier Drive from filling
+        save_n_checkpoints=1,  # each is ~5 GB; peak Drive use = 1 kept + 1 in-flight + best_model ≈ 15 GB
         save_checkpoints=True,
         print_eval=False,
         run_eval=True,
         eval_split_size=0.01,
-        test_sentences=[
-            {
-                "text": "Mhoro, ndinoda kudzidza chiShona.",
-                "speaker_wav": "",
-                "language": args.xtts_language,
-            },
-            {
-                "text": "EcoCash, ndiwo mararamiro edu!",
-                "speaker_wav": "",
-                "language": args.xtts_language,
-            },
-        ],
+        # The trainer synthesizes test_sentences at the END OF EVERY EPOCH and any
+        # exception there kills the run. An empty speaker_wav crashes load_audio(),
+        # so keep this empty unless every entry has a real reference wav path.
+        test_sentences=[],
         optimizer="AdamW",
         optimizer_params={"betas": [0.9, 0.96], "eps": 1e-8, "weight_decay": 1e-2},
         lr=args.lr,
@@ -310,16 +306,26 @@ def main():
     model = GPTTrainer.init_from_config(config, train_samples)
     model = model.to(device)
 
-    if device == "cuda" and not args.no_half:
-        logger.info("Enabling FP16 on GPT encoder for 6 GB VRAM optimisation")
+    if device == "cuda" and args.half:
+        logger.warning("FP16 GPT encoder enabled (--half): watch the first loss values for NaN/no movement.")
         model.xtts.gpt.half()
+
+    # The trainer's continue_path must be the run FOLDER (it reads
+    # <folder>/config.json and globs <folder>/*.pth). Accept a .pth for convenience.
+    resume_path = args.resume
+    if resume_path:
+        if resume_path.endswith(".pth"):
+            resume_path = str(Path(resume_path).parent)
+        if not Path(resume_path, "config.json").exists():
+            logger.error("--resume must point to a run folder containing config.json (got %s)", args.resume)
+            sys.exit(1)
 
     # --- Train ---
     trainer = Trainer(
         TrainerArgs(
             restore_path=None,
             grad_accum_steps=args.grad_accum,
-            continue_path=args.resume or "",
+            continue_path=resume_path,
         ),
         config,
         output_path=str(output_path),

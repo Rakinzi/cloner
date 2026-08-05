@@ -105,7 +105,9 @@ MPLBACKEND=Agg uv run python scripts/finetune_xtts.py \
   extrapolate: total iterations ≈ clips × epochs.
 - **Close browsers/games first** — 6 GB VRAM is exactly the budget; anything
   else on the GPU risks an out-of-memory crash.
-- If you get NaN losses: add `--no-half`.
+- FP16 is now opt-in: on a 6 GB GPU add `--half` if you hit out-of-memory
+  (experimental — watch the first losses for NaN or no movement; remove it
+  again if training misbehaves).
 - If the dataloader hangs: try `--workers 0`.
 
 ## 7. Resume after stopping (Ctrl-C, reboot, etc.)
@@ -129,7 +131,7 @@ MPLBACKEND=Agg uv run python scripts/finetune_xtts.py \
   --workers 2
 ```
 
-Checkpoints are ~5 GB each (2 kept + best model) — keep ~15 GB free under `~`.
+Checkpoints are ~5 GB each (1 kept + best model) — keep ~15 GB free under `~`.
 Check WSL disk from Windows if unsure: WSL's disk grows inside
 `%LOCALAPPDATA%\Packages\...\ext4.vhdx` on `C:`.
 
