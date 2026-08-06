@@ -39,6 +39,8 @@ server_err.txt
 
 # Runtime and model storage
 storage/
+checkpoints/
+*.pth
 
 # Local datasets and experiment output
 data/
