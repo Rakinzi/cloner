@@ -550,7 +550,7 @@
           <option value="zh-cn">Chinese (zh-cn)</option>
           <option value="ja">Japanese (ja)</option>
         </select>
-        <p class="helper">XTTSv2 doesn't natively support Shona — use <strong>en</strong> for best results with the cloned voice.</p>
+        <p class="helper">This model was finetuned on Shona speech using the <strong>en</strong> language token — XTTS has no native Shona token, so keep this on <strong>en</strong>.</p>
       </div>
     </div>
 
@@ -650,7 +650,7 @@
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner"></div> Generating...';
     document.getElementById('audioResult').classList.remove('visible');
-    setStatus('generateStatus', 'loading', 'Synthesizing speech on CPU — this may take 30–60 seconds...');
+    setStatus('generateStatus', 'loading', 'Synthesizing speech on CPU — this can take a few minutes, please wait...');
 
     try {
       const res = await fetch('/api/v1/voices/generate', {
