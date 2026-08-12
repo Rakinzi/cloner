@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -6,11 +7,13 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import cloning
+from app.routers import auth, cloning
+from app.services.db import create_db_and_tables
+from app.services.queue import worker as queue_worker
 from app.services.tts_model import TTSModelManager
 
 logging.basicConfig(
@@ -30,9 +33,12 @@ def _warm_model_in_background() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    create_db_and_tables()
     threading.Thread(target=_warm_model_in_background, daemon=True).start()
+    worker_task = asyncio.create_task(queue_worker())
     logger.info("Application ready at http://0.0.0.0:8000")
     yield
+    worker_task.cancel()
     logger.info("Shutting down.")
 
 
@@ -46,6 +52,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    # StaticFiles sends ETag/Last-Modified but no explicit Cache-Control, so
+    # browsers can serve a stale HTML/JS page without revalidating on a plain
+    # refresh — this has already caused a fix to appear not to take effect.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path in (
+        "/", "/login", "/register", "/generate", "/voices", "/history",
+    ):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+app.include_router(auth.router)
 app.include_router(cloning.router)
 
 _static = Path(__file__).parent / "static"
@@ -53,8 +73,33 @@ app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
 
 @app.get("/", include_in_schema=False)
-async def ui():
-    return FileResponse(str(_static / "index.html"))
+async def root():
+    return RedirectResponse(url="/generate")
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page():
+    return FileResponse(str(_static / "login.html"))
+
+
+@app.get("/register", include_in_schema=False)
+async def register_page():
+    return FileResponse(str(_static / "register.html"))
+
+
+@app.get("/generate", include_in_schema=False)
+async def generate_page():
+    return FileResponse(str(_static / "generate.html"))
+
+
+@app.get("/voices", include_in_schema=False)
+async def voices_page():
+    return FileResponse(str(_static / "voices.html"))
+
+
+@app.get("/history", include_in_schema=False)
+async def history_page():
+    return FileResponse(str(_static / "history.html"))
 
 
 @app.get("/health")

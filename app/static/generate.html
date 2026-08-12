@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shona Voice Cloner — Generate</title>
+  <script>
+    (function () {
+      var t = localStorage.getItem('cloner-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/portal.css" />
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<div class="portal-shell">
+  <nav id="nav" class="sidebar" aria-label="Main navigation"></nav>
+  <main id="main-content" tabindex="-1">
+  <div class="card">
+    <div class="card-title">Generate Speech</div>
+
+    <div class="form-group" style="margin-bottom:20px;">
+      <label for="voicePicker">Voice</label>
+      <select id="voicePicker" aria-label="Saved voices">
+        <option value="">— none selected —</option>
+      </select>
+      <p class="helper">No voices yet? <a href="/voices">Upload one</a>.</p>
+    </div>
+
+    <label for="textInput">Text to synthesize <span class="required">*</span></label>
+    <textarea id="textInput" placeholder="Type or paste Shona text here..." oninput="updateCharCount()" required aria-required="true"></textarea>
+    <p class="helper"><span id="charCount">0</span> characters</p>
+
+    <div class="form-group" style="margin-top:16px;">
+      <label for="languageSelect">Language mode</label>
+      <select id="languageSelect">
+        <option value="en">English (en) — recommended for Shona</option>
+        <option value="fr">French (fr)</option>
+        <option value="de">German (de)</option>
+        <option value="es">Spanish (es)</option>
+        <option value="pt">Portuguese (pt)</option>
+        <option value="ar">Arabic (ar)</option>
+        <option value="hi">Hindi (hi)</option>
+        <option value="zh-cn">Chinese (zh-cn)</option>
+        <option value="ja">Japanese (ja)</option>
+      </select>
+      <p class="helper">This model was finetuned on Shona speech using the <strong>en</strong> language token.</p>
+    </div>
+
+    <div class="generate-actions">
+      <span id="voiceStatus" class="helper">No voice selected</span>
+      <button class="btn btn-cta" id="generateBtn" onclick="generate()" disabled>Generate Audio</button>
+    </div>
+
+    <div class="status-bar" id="generateStatus" role="status" aria-live="polite"></div>
+    <div class="progress-container" id="progressContainer" hidden>
+      <progress id="generateProgress" max="100" value="0"></progress>
+      <span class="helper" id="progressLabel">0%</span>
+    </div>
+
+    <div class="audio-result" id="audioResult">
+      <audio id="audioPlayer" controls></audio>
+      <button class="btn btn-ghost" id="downloadBtn">Download WAV</button>
+    </div>
+  </div>
+  </main>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+  let voiceId = null;
+  let pollTimer = null;
+  const voicePicker = document.getElementById('voicePicker');
+
+  async function init() {
+    await requireAuth();
+    renderNav('generate');
+    await loadVoices();
+  }
+
+  async function loadVoices() {
+    const res = await apiFetch('/api/v1/voices');
+    const voices = await res.json();
+    voicePicker.innerHTML = '<option value="">— none selected —</option>' +
+      voices.map(v => `<option value="${esc(v.id)}">${esc(v.label)}</option>`).join('');
+  }
+
+  voicePicker.addEventListener('change', () => selectVoice(voicePicker.value));
+
+  function selectVoice(id) {
+    voiceId = id || null;
+    const status = document.getElementById('voiceStatus');
+    const btn = document.getElementById('generateBtn');
+    status.textContent = voiceId ? 'Voice ready' : 'No voice selected';
+    btn.disabled = !voiceId;
+  }
+
+  async function generate() {
+    const text = document.getElementById('textInput').value.trim();
+    if (!text) { setStatus('generateStatus', 'error', 'Please enter text to synthesize.'); return; }
+    if (!voiceId) { setStatus('generateStatus', 'error', 'Please select a voice first.'); return; }
+
+    const language = document.getElementById('languageSelect').value;
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    document.getElementById('audioResult').classList.remove('visible');
+    document.getElementById('progressContainer').hidden = true;
+    document.getElementById('generateProgress').value = 0;
+    setStatus('generateStatus', 'loading', 'Queued for generation...');
+
+    try {
+      const res = await apiFetch('/api/v1/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice_id: voiceId, text, language }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || `Server error ${res.status}`);
+      const { generation_id } = await res.json();
+      pollGeneration(generation_id);
+    } catch (err) {
+      setStatus('generateStatus', 'error', err.message);
+      btn.disabled = false;
+    }
+  }
+
+  let pollInFlight = false;
+  let pollGenerationId = null;
+
+  function pollGeneration(generationId) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollGenerationId = generationId;
+    pollTimer = setInterval(async () => {
+      // setInterval fires on a fixed schedule even if the previous tick's
+      // request is still in flight. Without this guard, an earlier (slow)
+      // tick can resolve after a later tick already saw a terminal status,
+      // re-applying a stale "running" render (e.g. a frozen progress bar)
+      // on top of the completed UI.
+      if (pollInFlight) return;
+      pollInFlight = true;
+
+      let gen;
+      try {
+        const res = await apiFetch(`/api/v1/generations/${generationId}`);
+        gen = await res.json();
+      } finally {
+        pollInFlight = false;
+      }
+
+      // A newer poll cycle (or a fresh generate() call) has superseded this one.
+      if (generationId !== pollGenerationId) return;
+
+      if (gen.status === 'pending' || gen.status === 'running') {
+        if (gen.progress > 0) {
+          document.getElementById('generateProgress').value = Math.round(gen.progress * 100);
+          document.getElementById('progressLabel').textContent = `${Math.round(gen.progress * 100)}%`;
+          document.getElementById('progressContainer').hidden = false;
+          clearStatus('generateStatus');
+        } else {
+          document.getElementById('progressContainer').hidden = true;
+          setStatus('generateStatus', 'loading', `Status: ${gen.status}...`);
+        }
+        return;
+      }
+
+      clearInterval(pollTimer);
+      document.getElementById('generateBtn').disabled = false;
+      document.getElementById('progressContainer').hidden = true;
+
+      if (gen.status === 'done') {
+        clearStatus('generateStatus');
+        const audioRes = await apiFetch(`/api/v1/generations/${generationId}/audio`);
+        const blob = await audioRes.blob();
+        const player = document.getElementById('audioPlayer');
+        player.src = URL.createObjectURL(blob);
+        document.getElementById('audioResult').classList.add('visible');
+        player.play();
+        document.getElementById('downloadBtn').onclick = () => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'shona_voice_output.wav';
+          a.click();
+        };
+      } else {
+        setStatus('generateStatus', 'error', gen.error || 'Generation failed.');
+      }
+    }, 1500);
+  }
+
+  function updateCharCount() {
+    document.getElementById('charCount').textContent = document.getElementById('textInput').value.length;
+  }
+
+  function setStatus(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `status-bar visible ${type}`;
+    el.innerHTML = '';
+    if (type === 'loading') {
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      el.appendChild(spinner);
+    }
+    el.appendChild(document.createTextNode(msg));
+  }
+
+  function clearStatus(id) {
+    const el = document.getElementById(id);
+    el.className = 'status-bar';
+    el.textContent = '';
+  }
+
+  init();
+</script>
+</body>
+</html>

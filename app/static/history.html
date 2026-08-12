@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shona Voice Cloner — History</title>
+  <script>
+    (function () {
+      var t = localStorage.getItem('cloner-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/portal.css" />
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<div class="portal-shell">
+  <nav id="nav" class="sidebar" aria-label="Main navigation"></nav>
+  <main id="main-content" tabindex="-1">
+  <div class="card">
+    <div class="card-title">Generation History</div>
+    <div class="form-group" style="margin-bottom:16px;">
+      <label for="voiceFilter">Filter by voice</label>
+      <select id="voiceFilter">
+        <option value="">All voices</option>
+      </select>
+    </div>
+    <div id="historyList"><p class="helper">No generations yet.</p></div>
+    <button class="btn btn-ghost" id="loadMoreBtn" style="display:none; margin-top:12px;">Load more</button>
+  </div>
+  </main>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+  const PAGE_SIZE = 50;
+  let offset = 0;
+  let currentVoiceFilter = '';
+
+  async function init() {
+    await requireAuth();
+    renderNav('history');
+    await loadVoiceFilterOptions();
+    await loadHistory(true);
+  }
+
+  async function loadVoiceFilterOptions() {
+    const res = await apiFetch('/api/v1/voices');
+    const voices = await res.json();
+    const select = document.getElementById('voiceFilter');
+    select.innerHTML = '<option value="">All voices</option>' +
+      voices.map(v => `<option value="${esc(v.id)}">${esc(v.label)}</option>`).join('');
+    select.addEventListener('change', () => {
+      currentVoiceFilter = select.value;
+      loadHistory(true);
+    });
+  }
+
+  async function loadHistory(reset) {
+    if (reset) offset = 0;
+    const url = currentVoiceFilter
+      ? `/api/v1/generations?voice_id=${encodeURIComponent(currentVoiceFilter)}`
+      : '/api/v1/generations';
+    const res = await apiFetch(url);
+    const gens = await res.json();
+    const container = document.getElementById('historyList');
+    const page = gens.slice(offset, offset + PAGE_SIZE);
+
+    if (gens.length === 0) {
+      container.innerHTML = '<p class="helper">No generations yet.</p>';
+      document.getElementById('loadMoreBtn').style.display = 'none';
+      return;
+    }
+
+    const rows = page.map(g => `
+      <div class="history-row">
+        <span class="history-text">${esc(g.text)}</span>
+        <span class="history-status status-${esc(g.status)}">
+          ${esc(g.status)}${g.status === 'done' ? ` — <a href="/api/v1/generations/${esc(g.id)}/audio" target="_blank">play</a>` : ''}
+        </span>
+      </div>
+    `).join('');
+
+    container.innerHTML = reset ? rows : container.innerHTML + rows;
+    offset += page.length;
+
+    document.getElementById('loadMoreBtn').style.display = offset < gens.length ? 'inline-flex' : 'none';
+  }
+
+  document.getElementById('loadMoreBtn').addEventListener('click', () => loadHistory(false));
+
+  init();
+</script>
+</body>
+</html>

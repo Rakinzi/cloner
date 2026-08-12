@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /app/storage/voices /app/storage/models
+RUN mkdir -p /app/storage/voices /app/storage/models /app/storage/generations
 
 EXPOSE 8000
 

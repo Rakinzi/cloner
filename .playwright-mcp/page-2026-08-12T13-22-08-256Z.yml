@@ -1,0 +1,56 @@
+- generic [active] [ref=f7e1]:
+  - link "Skip to main content" [ref=f7e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f7e3]:
+    - navigation "Main navigation" [ref=f7e4]:
+      - generic [ref=f7e5]: Shona Voice Cloner
+      - generic [ref=f7e6]:
+        - link "Generate" [ref=f7e7] [cursor=pointer]:
+          - /url: /generate
+        - link "Voices" [ref=f7e10] [cursor=pointer]:
+          - /url: /voices
+        - link "History" [ref=f7e14] [cursor=pointer]:
+          - /url: /history
+      - button "Toggle dark mode" [ref=f7e18] [cursor=pointer]:
+        - generic [ref=f7e25]: Dark mode
+      - link "Log out" [ref=f7e26] [cursor=pointer]:
+        - /url: "#"
+    - main [ref=f7e27]:
+      - generic [ref=f7e28]:
+        - generic [ref=f7e29]: Generate Speech
+        - generic [ref=f7e30]:
+          - generic [ref=f7e31]: Voice
+          - combobox "Saved voices" [ref=f7e32] [cursor=pointer]:
+            - option "— none selected —" [selected]
+            - option "Progress Test Voice"
+          - paragraph [ref=f7e33]:
+            - text: No voices yet?
+            - link "Upload one" [ref=f7e34] [cursor=pointer]:
+              - /url: /voices
+            - text: .
+        - generic [ref=f7e35]: Text to synthesize *
+        - textbox "Text to synthesize *" [ref=f7e36]:
+          - /placeholder: Type or paste Shona text here...
+        - paragraph [ref=f7e37]: 0 characters
+        - generic [ref=f7e38]:
+          - generic [ref=f7e39]: Language mode
+          - combobox "Language mode" [ref=f7e40] [cursor=pointer]:
+            - option "English (en) — recommended for Shona" [selected]
+            - option "French (fr)"
+            - option "German (de)"
+            - option "Spanish (es)"
+            - option "Portuguese (pt)"
+            - option "Arabic (ar)"
+            - option "Hindi (hi)"
+            - option "Chinese (zh-cn)"
+            - option "Japanese (ja)"
+          - paragraph [ref=f7e41]:
+            - text: This model was finetuned on Shona speech using the
+            - strong [ref=f7e42]: en
+            - text: language token.
+        - generic [ref=f7e43]:
+          - generic [ref=f7e44]: No voice selected
+          - button "Generate Audio" [disabled] [ref=f7e45]
+        - generic [ref=f7e46]:
+          - progressbar [ref=f7e47]
+          - generic [ref=f7e48]: 0%
