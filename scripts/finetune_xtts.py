@@ -339,7 +339,9 @@ def main():
     trainer.fit()
 
     # --- Copy best model for easy inference ---
-    runs = sorted(output_path.glob("run-*/best_model.pth"))
+    # The trainer names it best_model_<step>.pth and derives the run folder from
+    # run_name (e.g. shona_xtts_v2-August-06-...), so match both loosely.
+    runs = sorted(output_path.glob("*/best_model*.pth"), key=lambda p: p.stat().st_mtime)
     if runs:
         best = runs[-1]
         dest = output_path / "shona_xtts_model.pth"
@@ -347,7 +349,7 @@ def main():
         logger.info("Best model copied to: %s", dest)
         logger.info("To use it, set CLONER_FINETUNED_MODEL_PATH=%s", dest)
     else:
-        logger.warning("No best_model.pth found — check training logs.")
+        logger.warning("No best_model*.pth found under %s — check training logs.", output_path)
 
     logger.info("Done!")
 
