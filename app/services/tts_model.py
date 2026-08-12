@@ -1,5 +1,6 @@
 import logging
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 from app.config import settings
@@ -7,6 +8,15 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 _MPL_CACHE_DIR = Path("./storage/matplotlib")
 _MPL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_MAX_CONDITIONING_CACHE_ENTRIES = 8
+
+# Estimated output-audio-seconds per input character, derived from two
+# verified real generations ("Mangwanani" -> 2.18s/10 chars = 0.218;
+# a 5-char sample -> 1.29s/5 chars = 0.258). Used only to estimate a
+# generation's total expected duration for progress reporting — retune
+# by hand from real (text_len, audio_seconds_produced) log lines as more
+# data accumulates. Not a wall-clock timing estimate.
+OUTPUT_SECONDS_PER_CHAR = 0.22
 
 
 class TTSModelManager:
@@ -20,6 +30,8 @@ class TTSModelManager:
                     obj = super().__new__(cls)
                     obj._model = None
                     obj._device = None
+                    obj._conditioning_cache = OrderedDict()
+                    obj._conditioning_lock = threading.Lock()
                     cls._instance = obj
         return cls._instance
 
@@ -134,6 +146,30 @@ class TTSModelManager:
             self.load_model()
         return self._device
 
+    def _get_conditioning_latents(self, model, voice_path: str):
+        """Return cached voice conditioning, recomputing it if the WAV changed."""
+        path = Path(voice_path).resolve()
+        stat = path.stat()
+        cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
+
+        with self._conditioning_lock:
+            cached = self._conditioning_cache.get(cache_key)
+            if cached is not None:
+                self._conditioning_cache.move_to_end(cache_key)
+                return cached
+
+            conditioning = model.get_conditioning_latents(audio_path=[str(path)])
+
+            # Drop a stale fingerprint for this path before storing its new one.
+            for key in list(self._conditioning_cache):
+                if key[0] == str(path):
+                    del self._conditioning_cache[key]
+            self._conditioning_cache[cache_key] = conditioning
+            while len(self._conditioning_cache) > _MAX_CONDITIONING_CACHE_ENTRIES:
+                self._conditioning_cache.popitem(last=False)
+
+            return conditioning
+
     def generate(self, text: str, voice_path: str, language: str = "en") -> bytes:
         import io
 
@@ -144,12 +180,18 @@ class TTSModelManager:
 
         with torch.inference_mode():
             if settings.finetuned_model_path:
-                gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[voice_path])
+                gpt_cond_latent, speaker_embedding = self._get_conditioning_latents(model, voice_path)
                 out = model.inference(
                     text=text,
                     language=language,
                     gpt_cond_latent=gpt_cond_latent,
                     speaker_embedding=speaker_embedding,
+                    # The low-level XTTS API does not split text by default.  In
+                    # that mode text beyond the GPT token limit is truncated,
+                    # which is especially easy to hit with Shona tokenization.
+                    # XTTS joins the generated sentence chunks in the returned
+                    # waveform, so the caller still receives one WAV file.
+                    enable_text_splitting=True,
                 )
                 wav = out["wav"]
             else:
@@ -160,6 +202,47 @@ class TTSModelManager:
 
             buf = io.BytesIO()
             wavfile.write(buf, rate=24000, data=wav_int)
+            buf.seek(0)
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return buf.getvalue()
+
+    def generate_streaming(self, text: str, voice_path: str, language: str, on_chunk) -> bytes:
+        """Stream-generate audio via Xtts.inference_stream, invoking on_chunk(seconds_so_far)
+        after every decoded chunk. Only valid on the finetuned-checkpoint code path — the
+        stock TTS.api.TTS object has no streaming equivalent in this codebase."""
+        import io
+
+        import torch
+        from scipy.io import wavfile
+
+        model = self.model  # triggers load_model() if needed
+        sample_rate = 24000
+
+        with torch.inference_mode():
+            gpt_cond_latent, speaker_embedding = self._get_conditioning_latents(model, voice_path)
+
+            chunks = []
+            seconds_so_far = 0.0
+            for chunk in model.inference_stream(
+                text=text,
+                language=language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
+                enable_text_splitting=True,
+            ):
+                chunks.append(chunk)
+                seconds_so_far += len(chunk) / sample_rate
+                on_chunk(seconds_so_far)
+
+            full_wav = torch.cat(chunks, dim=-1) if chunks else torch.zeros(0)
+            wav_tensor = full_wav.to("cpu")
+            wav_int = (wav_tensor * 32767).to(torch.int16).numpy()
+
+            buf = io.BytesIO()
+            wavfile.write(buf, rate=sample_rate, data=wav_int)
             buf.seek(0)
 
         if torch.cuda.is_available():

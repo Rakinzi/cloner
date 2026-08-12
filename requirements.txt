@@ -8,3 +8,7 @@ scipy==1.14.1
 numpy
 python-multipart==0.0.20
 transformers<5
+sqlmodel>=0.0.22
+passlib[bcrypt]>=1.7.4
+bcrypt<4.1
+itsdangerous>=2.2.0

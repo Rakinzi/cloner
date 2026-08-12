@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shona Voice Cloner — Voices</title>
+  <script>
+    (function () {
+      var t = localStorage.getItem('cloner-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/portal.css" />
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<div class="portal-shell">
+  <nav id="nav" class="sidebar" aria-label="Main navigation"></nav>
+  <main id="main-content" tabindex="-1">
+  <div class="card">
+    <div class="card-title">Upload Voice Sample</div>
+    <div class="form-group" style="margin-bottom:16px;">
+      <label for="labelInput">Voice label *</label>
+      <input type="text" id="labelInput" placeholder="e.g. Tariro — female, warm" />
+    </div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.m4a,.flac" aria-label="Upload audio file" />
+      <p><strong>Click to upload</strong> or drag and drop</p>
+      <p class="file-types">MP3, WAV, OGG, M4A, FLAC — up to 50MB</p>
+    </div>
+    <p class="helper">For the best clone, use a clean, single-speaker recording with no background music, noise, or other voices — 10-30 seconds is plenty.</p>
+    <div class="status-bar" id="uploadStatus" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Your Voices</div>
+    <div id="voiceList"><p class="helper">No voices yet.</p></div>
+  </div>
+  </main>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const uploadZone = document.getElementById('uploadZone');
+
+  async function init() {
+    await requireAuth();
+    renderNav('voices');
+    await loadVoices();
+  }
+
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+  });
+
+  async function uploadFile(file) {
+    const label = document.getElementById('labelInput').value.trim();
+    if (!label) { setStatus('uploadStatus', 'error', 'Enter a label for this voice first.'); return; }
+    setStatus('uploadStatus', 'loading', `Uploading ${file.name}...`);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('label', label);
+
+    try {
+      const res = await apiFetch('/api/v1/voices/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
+      if (data.quality_warning) {
+        setStatus('uploadStatus', 'warning', `"${data.label}" uploaded. ${data.quality_warning}`);
+      } else {
+        setStatus('uploadStatus', 'success', `"${data.label}" uploaded successfully.`);
+        setTimeout(() => clearStatus('uploadStatus'), 4000);
+      }
+      document.getElementById('labelInput').value = '';
+      fileInput.value = '';
+      await loadVoices();
+    } catch (err) {
+      setStatus('uploadStatus', 'error', err.message);
+    }
+  }
+
+  async function loadVoices() {
+    const res = await apiFetch('/api/v1/voices');
+    const voices = await res.json();
+    const container = document.getElementById('voiceList');
+    if (voices.length === 0) {
+      container.innerHTML = '<p class="helper">No voices yet.</p>';
+      return;
+    }
+    container.innerHTML = voices.map(v => `
+      <div class="voice-row" data-id="${esc(v.id)}">
+        <span>${esc(v.label)}</span>
+        <button class="btn btn-danger delete-btn" data-id="${esc(v.id)}" data-label="${esc(v.label)}" aria-label="Delete voice ${esc(v.label)}">Delete</button>
+      </div>
+    `).join('');
+    container.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteVoice(btn.dataset.id, btn.dataset.label));
+    });
+  }
+
+  async function deleteVoice(id, label) {
+    if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    await apiFetch(`/api/v1/voices/${id}`, { method: 'DELETE' });
+    await loadVoices();
+  }
+
+  function setStatus(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `status-bar visible ${type}`;
+    el.innerHTML = '';
+    if (type === 'loading') {
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      el.appendChild(spinner);
+    }
+    el.appendChild(document.createTextNode(msg));
+  }
+
+  function clearStatus(id) {
+    const el = document.getElementById(id);
+    el.className = 'status-bar';
+    el.textContent = '';
+  }
+
+  init();
+</script>
+</body>
+</html>

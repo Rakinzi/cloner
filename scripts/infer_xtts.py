@@ -10,14 +10,25 @@ Usage:
         --checkpoint checkpoints/best_model_65420.pth \\
         --speaker-wav data/speaker_ref_sample.wav \\
         --output-dir output/shona_samples
+
+Prosody: put "|" in a sentence wherever you want a dramatic pause — chunks are
+synthesized separately (same voice) and stitched with --pause-ms of silence
+(default 900 ms). --auto-pause inserts markers before Shona conjunctions when a
+sentence has none, and --temperature widens pitch/prosody variation:
+
+    python scripts/infer_xtts.py ... --temperature 0.75 --seed 42 \\
+        --sentence "Ndinotenda zvikuru nekundibatsira kwamakaita pamusika | uye ndinovimba | tichashanda pamwe zvakare."
 """
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
+import torchaudio
 
 from finetune_xtts import CHECKPOINT_FILES, download_checkpoints, extend_tokenizer_vocab
 
@@ -53,12 +64,68 @@ def parse_args() -> argparse.Namespace:
         help="XTTS language token. XTTS has no 'sn' token, so Shona rides on a supported language (default 'en').",
     )
     parser.add_argument("--sentence", action="append", dest="sentences", help="Add a custom sentence (repeatable)")
+    parser.add_argument(
+        "--pause-marker",
+        default="|",
+        help="Character in the text marking a dramatic pause; chunks are synthesized separately "
+        "and stitched with silence (default '|')",
+    )
+    parser.add_argument("--pause-ms", type=int, default=900,
+                        help="Silence inserted at each pause marker, in ms (default 900)")
+    parser.add_argument(
+        "--auto-pause",
+        action="store_true",
+        help="If a sentence has no pause markers, insert them before Shona phrase-boundary "
+        "conjunctions (uye, asi, kana, nekuti, nokuti, saka)",
+    )
+    parser.add_argument("--temperature", type=float, default=None,
+                        help="GPT sampling temperature; higher = more pitch/prosody variation "
+                        "(library default if unset)")
+    parser.add_argument("--top-p", type=float, default=None,
+                        help="Nucleus sampling cutoff (library default if unset)")
+    parser.add_argument("--repetition-penalty", type=float, default=None,
+                        help="Penalty against repeated tokens (library default if unset)")
+    parser.add_argument("--speed", type=float, default=None,
+                        help="Speech speed factor, e.g. 0.9 slower / 1.1 faster (library default if unset)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Fix the torch RNG seed for reproducible A/B comparisons")
     return parser.parse_args()
 
 
 def load_shona_texts_from_checkpoint_neighbors() -> list[str]:
     """Best-effort text source for tokenizer coverage; falls back to the default sentences."""
     return DEFAULT_SENTENCES
+
+
+PAUSE_CONJUNCTIONS = ("uye", "asi", "kana", "nekuti", "nokuti", "saka")
+
+
+def insert_auto_pauses(text: str, marker: str) -> str:
+    """Insert a pause marker before Shona phrase-boundary conjunctions (no-op if markers exist)."""
+    if marker in text:
+        return text
+    pattern = re.compile(r"\s+(?=(?:%s)\b)" % "|".join(PAUSE_CONJUNCTIONS), re.IGNORECASE)
+    return pattern.sub(f" {marker} ", text)
+
+
+def trim_edges(wav: np.ndarray, sr: int, threshold_ratio: float = 0.01, margin_s: float = 0.05) -> np.ndarray:
+    """Trim leading/trailing silence so stitched pauses stay accurate.
+
+    XTTS emits a variable amount of silence around each chunk; without trimming
+    it would stack on top of the explicit inter-chunk pause and make gap
+    lengths unpredictable.
+    """
+    amp = np.abs(wav)
+    peak = float(amp.max()) if amp.size else 0.0
+    if peak <= 0.0:
+        return wav
+    above = np.nonzero(amp > peak * threshold_ratio)[0]
+    if above.size == 0:
+        return wav
+    margin = int(sr * margin_s)
+    start = max(0, int(above[0]) - margin)
+    end = min(len(wav), int(above[-1]) + 1 + margin)
+    return wav[start:end]
 
 
 def main() -> None:
@@ -121,19 +188,46 @@ def main() -> None:
     logger.info("Computing speaker latents from %s", speaker_wav)
     gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[str(speaker_wav)])
 
-    for idx, text in enumerate(sentences, start=1):
-        logger.info("Synthesizing [%d/%d]: %s", idx, len(sentences), text)
-        out = model.inference(
-            text=text,
-            language=args.xtts_language,
-            gpt_cond_latent=gpt_cond_latent,
-            speaker_embedding=speaker_embedding,
-        )
-        wav = torch.tensor(out["wav"]).unsqueeze(0)
-        out_path = output_dir / f"sample_{idx:02d}.wav"
-        import torchaudio
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
 
-        torchaudio.save(str(out_path), wav, config.audio.output_sample_rate)
+    # Only forward knobs the user actually set, so unset flags keep the library defaults.
+    sampling_kwargs = {
+        key: value
+        for key, value in {
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "repetition_penalty": args.repetition_penalty,
+            "speed": args.speed,
+        }.items()
+        if value is not None
+    }
+
+    sample_rate = config.audio.output_sample_rate
+    pause = np.zeros(int(sample_rate * args.pause_ms / 1000), dtype=np.float32)
+
+    for idx, text in enumerate(sentences, start=1):
+        if args.auto_pause:
+            text = insert_auto_pauses(text, args.pause_marker)
+        chunks = [c.strip() for c in text.split(args.pause_marker) if c.strip()]
+
+        pieces: list[np.ndarray] = []
+        for n, chunk in enumerate(chunks, start=1):
+            logger.info("Synthesizing [%d/%d] chunk %d/%d: %s", idx, len(sentences), n, len(chunks), chunk)
+            out = model.inference(
+                text=chunk,
+                language=args.xtts_language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
+                **sampling_kwargs,
+            )
+            if pieces:
+                pieces.append(pause)
+            pieces.append(trim_edges(np.asarray(out["wav"], dtype=np.float32), sample_rate))
+
+        wav = torch.from_numpy(np.concatenate(pieces)).unsqueeze(0)
+        out_path = output_dir / f"sample_{idx:02d}.wav"
+        torchaudio.save(str(out_path), wav, sample_rate)
         logger.info("Wrote %s", out_path)
 
     logger.info("Done. %d samples written to %s", len(sentences), output_dir)
