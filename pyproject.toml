@@ -19,7 +19,9 @@ dependencies = [
     "unidic-lite",
     "datasets>=5.0.0",
     "soundfile>=0.14.0",
-    "torchcodec>=0.7.0",
+    # PyPI does not publish torchcodec wheels for Intel macOS. It is used by
+    # dataset tooling, not by the FastAPI inference backend.
+    "torchcodec>=0.7.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
 ]
 
 [dependency-groups]
