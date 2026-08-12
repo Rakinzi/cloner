@@ -94,7 +94,7 @@ def main() -> None:
         logger.info("Loading actual training run config from %s", args.run_config)
         config.load_json(args.run_config)
         tokenizer_path = Path(config.model_args.tokenizer_file)
-        if not tokenizer_path.is_absolute() and not tokenizer_path.exists():
+        if not tokenizer_path.is_file():
             tokenizer_path = ckpt_paths["vocab.json"]
         config.model_args.tokenizer_file = str(tokenizer_path)
         config.model_args.mel_norm_file = str(ckpt_paths["mel_stats.pth"])

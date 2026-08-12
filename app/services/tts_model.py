@@ -64,8 +64,10 @@ class TTSModelManager:
                 tts = TTS(model_name=settings.tts_model_name, progress_bar=True)
                 if device == "cuda":
                     tts.to(device)
-                    if torch.cuda.is_available():
-                        tts.model.half()
+                    # TTS.api.TTS is a wrapper; the loaded model lives on its
+                    # synthesizer in current Coqui TTS releases.
+                    if torch.cuda.is_available() and tts.synthesizer is not None:
+                        tts.synthesizer.tts_model.half()
                 self._model = tts
 
             self._device = device
@@ -101,7 +103,9 @@ class TTSModelManager:
         config.model_args.dvae_checkpoint = str(ckpt_paths["dvae.pth"])
         config.model_args.xtts_checkpoint = str(ckpt_paths["model.pth"])
         tokenizer_path = Path(config.model_args.tokenizer_file)
-        if not tokenizer_path.exists():
+        # The stock config uses an empty tokenizer path. Path("") is ".",
+        # which exists but is a directory and cannot be loaded as a tokenizer.
+        if not tokenizer_path.is_file():
             tokenizer_path = ckpt_paths["vocab.json"]
         config.model_args.tokenizer_file = str(tokenizer_path)
 

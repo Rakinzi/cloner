@@ -9,8 +9,7 @@ class Settings(BaseSettings):
     sample_rate: int = 22050
     device: str = "cuda"
     tts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
-    finetuned_model_path: str = ""  # path to fine-tuned .pth checkpoint
-
+    finetuned_model_path: str = "./checkpoints/best_model_65420.pth"  # path to fine-tuned .pth checkpoint
     model_config = {"env_prefix": "CLONER_", "env_file": ".env"}
 
 

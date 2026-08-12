@@ -650,7 +650,7 @@
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner"></div> Generating...';
     document.getElementById('audioResult').classList.remove('visible');
-    setStatus('generateStatus', 'loading', 'Synthesizing speech on CPU — this can take a few minutes, please wait...');
+    setStatus('generateStatus', 'loading', 'Synthesizing speech - please wait...');
 
     try {
       const res = await fetch('/api/v1/voices/generate', {
